@@ -1,0 +1,164 @@
+diff --git a/drivers/block/xen-blkback/blkback.c b/drivers/block/xen-blkback/blkback.c
+index 15ec4db..841788a 100644
+--- a/drivers/block/xen-blkback/blkback.c
++++ b/drivers/block/xen-blkback/blkback.c
+@@ -49,6 +49,10 @@
+ #include <asm/xen/hypercall.h>
+ #include "common.h"
+ 
++#define CREATE_TRACE_POINTS
++//#include "trace.h"
++#include <trace/events/blkback.h>
++
+ /*
+  * These are rather arbitrary. They are fairly large because adjacent requests
+  * pulled from a communication ring are quite likely to end up being part of
+@@ -341,6 +345,7 @@ static void xen_blkbk_unmap(struct pending_req *req)
+ 	ret = HYPERVISOR_grant_table_op(
+ 		GNTTABOP_unmap_grant_ref, unmap, invcount);
+ 	BUG_ON(ret);
++	trace_blkback_unmap(req);
+ 	/*
+ 	 * Note, we use invcount, so nr->pages, so we can't index
+ 	 * using vaddr(req, i).
+@@ -384,6 +389,7 @@ static int xen_blkbk_map(struct blkif_request *req,
+ 	ret = HYPERVISOR_grant_table_op(GNTTABOP_map_grant_ref, map, nseg);
+ 	BUG_ON(ret);
+ 
++	trace_blkback_map(req);
+ 	/*
+ 	 * Now swizzle the MFN in our domain with the MFN from the other domain
+ 	 * so that when we access vaddr(pending_req,i) it has the contents of
+@@ -508,6 +514,7 @@ static void __end_block_io_op(struct pending_req *pending_req, int error)
+ 		}
+ 		free_req(pending_req);
+ 	}
++	trace_blkback_end(pending_req);
+ }
+ 
+ /*
+@@ -570,6 +577,7 @@ __do_block_io_op(struct xen_blkif *blkif)
+ 			BUG();
+ 		}
+ 		blk_rings->common.req_cons = ++rc; /* before make_response() */
++		trace_blkback_getreq(&req);
+ 
+ 		/* Apply all sanity checks to /private copy/ of request. */
+ 		barrier();
+@@ -770,6 +778,7 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
+ 	for (i = 0; i < nbio; i++)
+ 		submit_bio(operation, biolist[i]);
+ 
++	trace_blkback_submit(req);
+ 	/* Let the I/Os go.. */
+ 	blk_finish_plug(&plug);
+ 
+@@ -837,6 +846,7 @@ static void make_response(struct xen_blkif *blkif, u64 id,
+ 	spin_unlock_irqrestore(&blkif->blk_ring_lock, flags);
+ 	if (notify)
+ 		notify_remote_via_irq(blkif->irq);
++	trace_blkback_notify(id);
+ }
+ 
+ static int __init xen_blkif_init(void)
+diff --git a/include/trace/events/blkback.h b/include/trace/events/blkback.h
+index e69de29..ff6d47b 100644
+--- a/include/trace/events/blkback.h
++++ b/include/trace/events/blkback.h
+@@ -0,0 +1,96 @@
++#undef TRACE_SYSTEM
++#define TRACE_SYSTEM blkback
++
++
++#if !defined(__TRACE_BLKBACK_H) || defined(TRACE_HEADER_MULTI_READ)
++#define __TRACE_BLKBACK_H
++
++#include <linux/tracepoint.h>
++
++TRACE_EVENT(blkback_getreq,
++	TP_PROTO(struct blkif_request *req),
++	TP_ARGS(req),
++	TP_STRUCT__entry(
++		__field(struct blkif_request *, req)
++	),
++	TP_fast_assign(
++		__entry->req = req;
++	),
++	TP_printk(
++		"blkback_getrequest req = [%p] ", __entry->req
++	)
++);
++
++TRACE_EVENT(blkback_map,
++	TP_PROTO(struct blkif_request *req),
++	TP_ARGS(req),
++	TP_STRUCT__entry(
++		__field(struct blkif_request *, req)
++	),
++	TP_fast_assign(
++		__entry->req = req;
++	),
++	TP_printk(
++		"blkback map grant reference req = [%p] ", __entry->req
++	)
++);
++
++TRACE_EVENT(blkback_submit,
++	TP_PROTO(struct blkif_request *req),
++	TP_ARGS(req),
++	TP_STRUCT__entry(
++		__field(struct blkif_request *, req)
++	),
++	TP_fast_assign(
++		__entry->req = req;
++	),
++	TP_printk(
++		"blkback_submit req = [%p] ", __entry->req
++	)
++);
++
++TRACE_EVENT(blkback_unmap,
++	TP_PROTO(struct pending_req *req),
++	TP_ARGS(req),
++	TP_STRUCT__entry(
++		__field(struct pending_req *, req)
++	),
++	TP_fast_assign(
++		__entry->req = req;
++	),
++	TP_printk(
++		"blkback unmap grant reference req = [%p] ", __entry->req
++	)
++);
++
++TRACE_EVENT(blkback_end,
++	TP_PROTO(struct pending_req *req),
++	TP_ARGS(req),
++	TP_STRUCT__entry(
++		__field(struct pending_req *, req)
++	),
++	TP_fast_assign(
++		__entry->req = req;
++	),
++	TP_printk(
++		"blkback_end req = [%p] ", __entry->req
++	)
++);
++TRACE_EVENT(blkback_notify,
++	TP_PROTO(u64 id),
++	TP_ARGS(id),
++	TP_STRUCT__entry(
++		__field(long int, id)
++	),
++	TP_fast_assign(
++		__entry->id = id;
++	),
++	TP_printk(
++		"blkback_notify id = [%ld] ", __entry->id
++	)
++);
++
++#endif /* __TRACE_BLKBACK_H */
++
++#include <trace/define_trace.h>
++

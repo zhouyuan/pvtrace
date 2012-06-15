@@ -1,0 +1,144 @@
+diff --git a/drivers/block/xen-blkfront.c b/drivers/block/xen-blkfront.c
+index 7b2ec59..7aaf562 100644
+--- a/drivers/block/xen-blkfront.c
++++ b/drivers/block/xen-blkfront.c
+@@ -57,6 +57,10 @@
+ 
+ #include <asm/xen/hypervisor.h>
+ 
++#define CREATE_TRACE_POINTS
++#include <trace/events/blkfront.h>
++
++
+ enum blkif_state {
+ 	BLKIF_STATE_DISCONNECTED,
+ 	BLKIF_STATE_CONNECTED,
+@@ -281,6 +285,7 @@ static int blkif_queue_request(struct request *req)
+ 			BLKIF_MAX_SEGMENTS_PER_REQUEST);
+ 		return 1;
+ 	}
++	trace_blkfront_allocgrant(gref_head);
+ 
+ 	/* Fill out a communications ring structure. */
+ 	ring_req = RING_GET_REQUEST(&info->ring, info->ring.req_prod_pvt);
+@@ -327,6 +332,7 @@ static int blkif_queue_request(struct request *req)
+ 					info->xbdev->otherend_id,
+ 					buffer_mfn,
+ 					rq_data_dir(req));
++			trace_blkfront_grant(buffer_mfn);
+ 
+ 			info->shadow[id].frame[i] = mfn_to_pfn(buffer_mfn);
+ 			ring_req->u.rw.seg[i] =
+@@ -356,6 +362,7 @@ static inline void flush_requests(struct blkfront_info *info)
+ 
+ 	if (notify)
+ 		notify_remote_via_irq(info->irq);
++	trace_blkfront_notify(info);
+ }
+ 
+ /*
+@@ -379,6 +386,7 @@ static void do_blkif_request(struct request_queue *rq)
+ 			goto wait;
+ 
+ 		blk_start_request(req);
++		trace_blkfront_getreq(req);
+ 
+ 		if ((req->cmd_type != REQ_TYPE_FS) ||
+ 		    ((req->cmd_flags & (REQ_FLUSH | REQ_FUA)) &&
+@@ -785,6 +793,7 @@ static irqreturn_t blkif_interrupt(int irq, void *dev_id)
+ 					"request: %x\n", bret->status);
+ 
+ 			__blk_end_request_all(req, error);
++			trace_blkfront_complete(req);
+ 			break;
+ 		default:
+ 			BUG();
+diff --git a/include/trace/events/blkfront.h b/include/trace/events/blkfront.h
+index e69de29..832cc5d 100644
+--- a/include/trace/events/blkfront.h
++++ b/include/trace/events/blkfront.h
+@@ -0,0 +1,84 @@
++#undef TRACE_SYSTEM
++#define TRACE_SYSTEM blkfront
++
++
++#if !defined(__TRACE_BLKFRONT_H) || defined(TRACE_HEADER_MULTI_READ)
++#define __TRACE_BLKFRONT_H 
++
++#include <linux/tracepoint.h>
++
++TRACE_EVENT(blkfront_getreq,
++        TP_PROTO(struct request *req),
++        TP_ARGS(req),
++        TP_STRUCT__entry(
++                __field(struct request *, req)
++        ),
++        TP_fast_assign(
++                __entry->req = req;
++        ),
++        TP_printk(
++                "blkfront_getreq req = [%p] ", __entry->req
++        )
++);
++
++TRACE_EVENT(blkfront_allocgrant,
++        TP_PROTO(unsigned long gref_head),
++        TP_ARGS(gref_head),
++        TP_STRUCT__entry(
++                __field(unsigned long, gref_head)
++        ),
++        TP_fast_assign(
++                __entry->gref_head = gref_head;
++        ),
++        TP_printk(
++                "blkfront_allocgrant gref_head = [%lx] ", __entry->gref_head
++        )
++);
++
++TRACE_EVENT(blkfront_grant,
++        TP_PROTO(unsigned long buffer_mfn),
++        TP_ARGS(buffer_mfn),
++        TP_STRUCT__entry(
++                __field(unsigned long, buffer_mfn)
++        ),
++        TP_fast_assign(
++                __entry->buffer_mfn = buffer_mfn;
++        ),
++        TP_printk(
++                "blkfront_grant buffer_mfn = [%lx] ", __entry->buffer_mfn
++        )
++);
++
++TRACE_EVENT(blkfront_notify,
++        TP_PROTO(struct blkfront_info *info),
++        TP_ARGS(info),
++        TP_STRUCT__entry(
++                __field(struct blkfront_info *, info)
++        ),
++        TP_fast_assign(
++                __entry->info = info;
++        ),
++        TP_printk(
++                "blkfront_notify info = [%p] ", __entry->info
++        )
++);
++TRACE_EVENT(blkfront_complete,
++        TP_PROTO(struct request *req),
++        TP_ARGS(req),
++        TP_STRUCT__entry(
++                __field(struct rquest *, req)
++        ),
++        TP_fast_assign(
++                __entry->req = req;
++        ),
++        TP_printk(
++                "blkfront_complete req = [%p] ", __entry->req
++        )
++);
++
++
++#endif /* __TRACE_BLKFRONT_H */
++
++#include <trace/define_trace.h>
++
++
